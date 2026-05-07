@@ -153,37 +153,90 @@ sequenceDiagram
 
 > External interfaces: CLI entry point and file I/O boundaries.
 
-| ARCH ID | Interface Name | Direction | Protocol | Input | Output | Error Handling |
-|---------|---------------|-----------|----------|-------|--------|----------------|
-| ARCH-001 | Parse Requirements | Input | File I/O (Markdown) | Path to `requirements.md` (string) | Structured REQ data: `{id: REQ-NNN, description, priority, rationale, verification}[]` | Returns error object with message when file missing, empty, or contains zero REQ-NNN identifiers |
-| ARCH-002 | Load Domain Config | Input | File I/O (YAML) | Path to `v-model-config.yml` (string) | Domain value: `"iso_26262"` \| `"do_178c"` \| `"iec_62304"` \| `null` | Returns `null` when config file absent; returns `null` when domain field absent/empty |
-| ARCH-003 | Load Overlay | Input | File I/O (Markdown) | Domain value (string), base path (string) | Overlay content (string) or `null` | Returns `null` when overlay file does not exist; logs warning when domain is set but overlay missing |
-| ARCH-011 | Detect Coexistence | Input | File I/O | Path to v-model directory | Warning message (string) or `null` | Never blocks generation; returns warning when `architecture-design.md` exists |
-| ARCH-013 | Assemble Output | Output | File I/O (Markdown) | All generated sections, template structure | Written `software-architecture-design.md` file | Returns error when write fails (permissions, disk space) |
-| ARCH-014 | Setup Script Adapter | CLI | Shell/PowerShell script | `--require-reqs` flag, feature directory path | JSON: `{VMODEL_DIR, FEATURE_DIR, BRANCH, REQUIREMENTS, AVAILABLE_DOCS}` | Exits non-zero when requirements.md missing with `--require-reqs` |
+| ARCH ID | Interface Name | Direction | Protocol | Input Type | Input Format | Output Type | Output Format | Error Handling |
+|---------|---------------|-----------|----------|------------|--------------|-------------|---------------|----------------|
+| ARCH-001 | Parse Requirements | Input | File I/O (Markdown) | `string` | File path to `requirements.md` (relative or absolute) | `Array<Requirement>` | `{id: string, description: string, priority: string, rationale: string, verification: string}[]` | Returns `{error: string, code: string}` when file missing (`ERR_FILE_NOT_FOUND`), empty (`ERR_FILE_EMPTY`), or contains zero REQ-NNN identifiers (`ERR_NO_REQ_FOUND`) |
+| ARCH-002 | Load Domain Config | Input | File I/O (YAML) | `string` | File path to `v-model-config.yml` (repository root) | `string \| null` | `"iso_26262"` \| `"do_178c"` \| `"iec_62304"` \| `null` | Returns `null` when config file absent (`ERR_CONFIG_MISSING`); returns `null` when `domain` field absent/empty (`ERR_DOMAIN_UNSET`) |
+| ARCH-003 | Load Overlay | Input | File I/O (Markdown) | `{domain: string, basePath: string}` | Domain value + base repository path | `string \| null` | Raw Markdown content or `null` | Returns `null` when overlay file does not exist (`WARN_OVERLAY_MISSING`); logs warning when domain is set but overlay missing |
+| ARCH-004 | Decompose Requirements | Input | In-process call | `Array<Requirement>` | Structured REQ objects from ARCH-001 | `Array<ArchElement>` | `{id: string, name: string, description: string, parentReqs: string[], type: string, tags: string[], lifecycleState: string}[]` | Raises `EMPTY_INPUT` when zero REQs; raises `INVALID_REQ_STRUCTURE` when REQ missing required fields |
+| ARCH-005 | Generate Logical View | Input | In-process call | `Array<ArchElement>` | ARCH element definitions from ARCH-004 | `string` | Markdown table string with columns: ARCH ID, Name, Description, Parent Requirements, Type | Raises `ZERO_ARCH_ELEMENTS` when input array is empty |
+| ARCH-006 | Generate Process View | Input | In-process call | `Array<ArchElement>` | ARCH element definitions + interaction paths | `string` | Mermaid `sequenceDiagram` block | Raises `INVALID_MERMAID_SYNTAX` when diagram syntax is malformed |
+| ARCH-007 | Generate Interface View | Input | In-process call | `Array<ArchElement>` | ARCH element definitions | `string` | Markdown table string with interface contracts | Emits `WARN_BLACKBOX_ELEMENT` for elements with empty contracts |
+| ARCH-008 | Generate Data Flow View | Input | In-process call | `Array<ArchElement>` | ARCH element definitions + data flow paths | `string` | Markdown transformation chain table | Raises `BROKEN_DATA_CHAIN` when data flow path is incomplete |
+| ARCH-009 | Generate SWE.2 Sections | Input | In-process call | `{archElements: Array<ArchElement>, reqData: Array<Requirement>, overlayContent: string \| null}` | ARCH definitions + REQ data + overlay content | `string \| null` | SWE.2 BP1–BP9 Markdown sections or `null` | Skips entirely when `overlayContent` is `null`; no error raised |
+| ARCH-010 | Generate Traceability | Input | In-process call | `{archElements: Array<ArchElement>, reqData: Array<Requirement>}` | ARCH definitions + REQ data | `TraceReport` | `{totalReqs: number, totalArch: number, coveragePct: number, mapping: Map<string, string[]>, uncovered: string[]}` | Handles many-to-many without double-counting; `coveragePct` computed as `covered/total * 100` |
+| ARCH-011 | Detect Coexistence | Input | File I/O | `string` | Path to v-model directory | `string \| null` | Warning message string or `null` | Never blocks generation; returns warning when `architecture-design.md` exists |
+| ARCH-012 | Manage Lifecycle | Input | File I/O | `{featureDir: string, newArchIds: string[]}` | Feature directory path + newly generated ARCH IDs | `LifecycleState` | `{annotations: Map<string, string>, deprecated: string[], current: string[]}` | Preserves deprecated entries with `[DEPRECATED — ...]` tags; never renumbers |
+| ARCH-013 | Assemble Output | Output | File I/O (Markdown) | `{sections: Map<string, string>, template: string, metadata: object}` | All generated sections + template structure + header metadata | `void` | Writes `software-architecture-design.md` to `{VMODEL_DIR}/` | Raises `WRITE_PERMISSION_ERROR` when file write fails; raises `DISK_SPACE_ERROR` when insufficient space |
+| ARCH-014 | Setup Script Adapter | CLI | Shell/PowerShell script | `{flags: string[], featureDir: string}` | `--require-reqs` flag + feature directory path | `JSON` | `{VMODEL_DIR: string, FEATURE_DIR: string, BRANCH: string, REQUIREMENTS: string, AVAILABLE_DOCS: string[]}` | Exits code `1` with `ERR_MISSING_REQUIREMENTS` message when `--require-reqs` set and requirements.md missing |
+| ARCH-015 | Pattern Library Access | Utility | In-process call | `{patternName: string}` | Pattern identifier | `RegExp \| null` | Compiled regex object or `null` if pattern not found | Returns `null` for unknown patterns; never raises exception |
+| ARCH-016 | Template Access | Utility | In-process call | `{section?: string}` | Optional section name | `string \| null` | Template string or specific section content | Returns `null` for unknown sections |
 
 ## Interface View — Internal Interface Contracts
 
 > Internal interfaces: element-to-element communication within the pipeline.
 
-| Source ARCH | Target ARCH | Interface Name | Protocol | Data Format | Error Handling |
-|-------------|-------------|----------------|----------|-------------|----------------|
-| ARCH-001 | ARCH-004 | Requirements → Decomposer | In-process call | `Array<{id, description, priority, rationale, verification}>` | EMPTY_INPUT exception raised when zero REQs found |
-| ARCH-002 | ARCH-003 | Domain → Overlay Loader | In-process call | Domain string or `null` | Returns `null` when domain absent; logs warning when overlay missing |
-| ARCH-003 | ARCH-009 | Overlay → SWE.2 Generator | In-process call | Overlay content string or `null` | When `null`, SWE.2 generator skips entirely |
-| ARCH-004 | ARCH-005 | Decomposer → Logical View Gen | In-process call | `Array<{id, name, description, parentReqs, type, tags}>` | Returns error when zero ARCH elements provided |
-| ARCH-004 | ARCH-006 | Decomposer → Process View Gen | In-process call | ARCH element definitions + interaction paths | Returns error when Mermaid syntax is invalid |
-| ARCH-004 | ARCH-007 | Decomposer → Interface View Gen | In-process call | ARCH element definitions | Emits anti-pattern warning for black-box elements |
-| ARCH-004 | ARCH-008 | Decomposer → Data Flow View Gen | In-process call | ARCH element definitions + data flow paths | Returns error when data flow chain is broken |
-| ARCH-005 | ARCH-013 | Logical View → Output Assembler | In-process call | Markdown table string | N/A (structural — validated at generation) |
-| ARCH-006 | ARCH-013 | Process View → Output Assembler | In-process call | Mermaid diagram string | N/A (structural) |
-| ARCH-007 | ARCH-013 | Interface View → Output Assembler | In-process call | Interface contract Markdown tables | N/A (structural) |
-| ARCH-008 | ARCH-013 | Data Flow View → Output Assembler | In-process call | Transformation chain Markdown table | N/A (structural) |
-| ARCH-009 | ARCH-013 | SWE.2 Sections → Output Assembler | In-process call | SWE.2 BP1–BP9 Markdown or `null` | When `null`, SWE.2 placeholder replaced with omission note |
-| ARCH-010 | ARCH-013 | Traceability → Output Assembler | In-process call | Coverage report: `{total_reqs, total_arch, coverage_pct, uncovered[]}` | Handles many-to-many without double-counting |
-| ARCH-012 | ARCH-004 | Lifecycle → Decomposer | In-process call | Annotated ARCH definitions with lifecycle tags | Preserves deprecated entries; never renumbers |
-| ARCH-015 | ARCH-001, ARCH-004, ARCH-010 | ID Pattern Library → Consumers | In-process call | Compiled regex objects | Returns empty array when no matches (no false positives) |
-| ARCH-016 | ARCH-013 | Template → Output Assembler | In-process call | Template string with section placeholders | N/A — static template; validated at authoring time |
+| Source ARCH | Target ARCH | Interface Name | Direction | Protocol | Data Type | Data Format | Payload Schema | Error Handling |
+|-------------|-------------|----------------|-----------|----------|-----------|-------------|----------------|----------------|
+| ARCH-001 | ARCH-004 | Requirements → Decomposer | Out → In | In-process call | `Array<Requirement>` | JSON-serialized array | `Array<{id: "REQ-"+string, description: string, priority: string, rationale: string, verification: string}>` | `EMPTY_INPUT` exception when `length === 0`; `INVALID_SCHEMA` when required fields missing |
+| ARCH-002 | ARCH-003 | Domain → Overlay Loader | Out → In | In-process call | `DomainContext` | `{domain: string, basePath: string}` | `{domain: "iso_26262" \| "do_178c" \| "iec_62304" \| null, basePath: string}` | Returns `null` domain; logs `WARN_DOMAIN_UNSET` |
+| ARCH-003 | ARCH-009 | Overlay → SWE.2 Generator | Out → In | In-process call | `string \| null` | Raw Markdown or null | `string` (full overlay content) or `null` | When `null`, generator skips; no error raised |
+| ARCH-004 | ARCH-005 | Decomposer → Logical View Gen | Out → In | In-process call | `Array<ArchElement>` | JSON-serialized array | `Array<{id: string, name: string, description: string, parentReqs: string[], type: string, tags: string[], lifecycleState: string}>` | `ZERO_ARCH_ELEMENTS` when `length === 0` |
+| ARCH-004 | ARCH-006 | Decomposer → Process View Gen | Out → In | In-process call | `ArchContext` | `{elements: Array<ArchElement>, paths: InteractionPath[]}` | `{elements: ArchElement[], paths: {from: string, to: string, message: string}[]}` | `INVALID_MERMAID_SYNTAX` when participant IDs invalid |
+| ARCH-004 | ARCH-007 | Decomposer → Interface View Gen | Out → In | In-process call | `Array<ArchElement>` | JSON-serialized array | `Array<ArchElement>` (same schema as above) | `WARN_BLACKBOX_ELEMENT` for elements with empty `description` |
+| ARCH-004 | ARCH-008 | Decomposer → Data Flow View Gen | Out → In | In-process call | `DataFlowContext` | `{elements: Array<ArchElement>, chains: DataChain[]}` | `{elements: ArchElement[], chains: {stage: number, module: string, input: string, transform: string, output: string}[]}` | `BROKEN_DATA_CHAIN` when chain is incomplete |
+| ARCH-005 | ARCH-013 | Logical View → Output Assembler | Out → In | In-process call | `string` | Markdown table | Valid Markdown table with pipe-separated columns | Structural validation at generation time; no runtime errors |
+| ARCH-006 | ARCH-013 | Process View → Output Assembler | Out → In | In-process call | `string` | Mermaid diagram | Valid Mermaid `sequenceDiagram` block | Structural validation at generation time |
+| ARCH-007 | ARCH-013 | Interface View → Output Assembler | Out → In | In-process call | `string` | Markdown table | Valid Markdown table with interface contracts | Structural validation at generation time |
+| ARCH-008 | ARCH-013 | Data Flow View → Output Assembler | Out → In | In-process call | `string` | Markdown table | Valid Markdown transformation table | Structural validation at generation time |
+| ARCH-009 | ARCH-013 | SWE.2 Sections → Output Assembler | Out → In | In-process call | `string \| null` | Markdown sections or null | BP1–BP9 subsections as Markdown | When `null`, SWE.2 placeholder replaced with `*[SWE.2 sections omitted — domain is not iso_26262]*` |
+| ARCH-010 | ARCH-013 | Traceability → Output Assembler | Out → In | In-process call | `TraceReport` | Structured object | `{totalReqs: number, totalArch: number, coveragePct: number, mapping: {[reqId]: string[]}, uncovered: string[]}` | Many-to-many handled without double-counting; `coveragePct = (covered/totalReqs) * 100` |
+| ARCH-012 | ARCH-004 | Lifecycle → Decomposer | Out → In | In-process call | `LifecycleState` | `{annotations: Map<string, string>, deprecated: string[], current: string[]}` | Map of ARCH-ID → lifecycle annotation | Preserves deprecated entries; never renumbers existing IDs |
+| ARCH-015 | ARCH-001 | ID Pattern → Requirements Parser | Out → In | In-process call | `RegExp` | Compiled regex | `/REQ(-[A-Z]{0,5})?-[0-9]{3}/` | Returns empty array when no matches; no exception |
+| ARCH-015 | ARCH-004 | ID Pattern → Decomposer | Out → In | In-process call | `RegExp` | Compiled regex | `/ARCH-[0-9]{3}/` | Returns empty array when no matches; no exception |
+| ARCH-015 | ARCH-010 | ID Pattern → Traceability | Out → In | In-process call | `RegExp[]` | Array of compiled regexes | `[/REQ(-[A-Z]{0,5})?-[0-9]{3}/, /ARCH-[0-9]{3}/]` | Returns empty array when no matches; no exception |
+| ARCH-016 | ARCH-013 | Template → Output Assembler | Out → In | In-process call | `string` | Markdown template | Full template with `{{{section_name}}}` placeholders | Static template; validated at authoring time |
+
+## Interface Type Definitions
+
+> Canonical type definitions for interface contracts.
+
+### Data Types
+
+| Type Name | Description | Schema | Constraints |
+|-----------|-------------|--------|-------------|
+| `Requirement` | Parsed requirement from requirements.md | `{id: string, description: string, priority: string, rationale: string, verification: string}` | `id` must match `/REQ(-[A-Z]{0,5})?-[0-9]{3}/` |
+| `ArchElement` | Architecture element definition | `{id: string, name: string, description: string, parentReqs: string[], type: string, tags: string[], lifecycleState: string}` | `id` must match `/ARCH-[0-9]{3}/`; `type` ∈ {Component, Service, Library, Utility, Adapter, Cross-Cutting} |
+| `DomainContext` | Domain configuration context | `{domain: string \| null, basePath: string}` | `domain` ∈ {"iso_26262", "do_178c", "iec_62304", null} |
+| `LifecycleState` | ARCH lifecycle annotations | `{annotations: Map<string, string>, deprecated: string[], current: string[]}` | Deprecated IDs never renumbered |
+| `TraceReport` | Traceability coverage report | `{totalReqs: number, totalArch: number, coveragePct: number, mapping: {[reqId]: string[]}, uncovered: string[]}` | `coveragePct` ∈ [0, 100] |
+
+### Protocol Definitions
+
+| Protocol | Description | Transport | Serialization | Reliability |
+|----------|-------------|-----------|---------------|-------------|
+| File I/O (Markdown) | Read/write Markdown files | POSIX file system | UTF-8 text | At-least-once read; write confirmation required |
+| File I/O (YAML) | Read YAML config files | POSIX file system | UTF-8 text, YAML parsed | At-least-once read; validation required |
+| In-process call | Direct function invocation | JVM/Node.js call stack | JSON-serialized objects | At-most-once (synchronous); exceptions propagate |
+| Shell/PowerShell script | CLI script execution | Process spawn | stdout/stderr streams | Exit code indicates success/failure |
+
+### Error Codes
+
+| Code | Severity | Description | Handling |
+|------|----------|-------------|----------|
+| `ERR_FILE_NOT_FOUND` | ERROR | Input file does not exist | Return error object; terminate pipeline |
+| `ERR_FILE_EMPTY` | ERROR | Input file exists but contains no content | Return error object; terminate pipeline |
+| `ERR_NO_REQ_FOUND` | ERROR | File contains no valid REQ-NNN identifiers | Return error object; terminate pipeline |
+| `ERR_CONFIG_MISSING` | WARN | v-model-config.yml not found | Return `null` domain; continue pipeline |
+| `ERR_DOMAIN_UNSET` | WARN | domain field absent or empty in config | Return `null` domain; continue pipeline |
+| `WARN_OVERLAY_MISSING` | WARN | Domain overlay file not found | Return `null` overlay; continue pipeline |
+| `WARN_BLACKBOX_ELEMENT` | WARN | ARCH element has no interface definition | Emit warning; continue with placeholder |
+| `EMPTY_INPUT` | ERROR | Empty array passed to downstream generator | Raise exception; terminate pipeline |
+| `INVALID_SCHEMA` | ERROR | Input object missing required fields | Raise exception; terminate pipeline |
+| `BROKEN_DATA_CHAIN` | ERROR | Data flow chain is incomplete | Raise exception; terminate pipeline |
+| `WRITE_PERMISSION_ERROR` | ERROR | Cannot write output file | Raise exception; terminate pipeline |
+| `DISK_SPACE_ERROR` | ERROR | Insufficient disk space for write | Raise exception; terminate pipeline |
+| `ERR_MISSING_REQUIREMENTS` | ERROR | requirements.md missing with --require-reqs | Exit code 1; terminate command |
 
 ## Data Flow View — Data Transformation Chain
 
