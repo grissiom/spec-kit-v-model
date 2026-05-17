@@ -35,6 +35,7 @@ The output must support:
 - ASPICE SWE.2 process guidance (only when `domain: iso_26262` in `v-model-config.yml`)
 - ISO/IEC 42030:2019 architecture evaluation + ISO/IEC 25010:2023 quality attribute cross-check
 - explicit handling of derived requirements, derived modules, and cross-cutting elements
+- **architecture governance**: Phase -1 architecture framing (intent, core tensions, stable boundaries, change axes, invariants, anti-patterns), per-view gap tracking, and architecture gate verification (6 hard ERROR gates)
 
 ## Execution Steps
 
@@ -80,7 +81,30 @@ Load `v-model-config.yml` if it exists at the repository root.
 - Do NOT include any domain-specific regulatory references
 - SWE.2 sections are NOT generated
 
-### 4. Lifecycle Rules (When Evolving Existing Artifacts)
+### 4. Architecture Framing (Phase -1)
+
+Before decomposing requirements into architecture elements, establish the architecture judgment this pass must preserve. This framing constrains all four views and the architecture evaluation. Do not create an additional file — apply this framing as the decision filter for every later step.
+
+**Identify the following** and use them to constrain all subsequent view generation:
+
+1. **Architecture Intent**: What this architecture pass is trying to make stable or explicit. What boundaries, tradeoffs, and constraints must future implementation preserve?
+2. **Core Tensions**: The main design forces in conflict (e.g., modularity vs performance, simplicity vs extensibility), and the current tradeoff direction for each. For each tension, identify which views are affected and the architectural consequence.
+3. **Stable Boundaries**: Responsibilities or authority lines that should remain stable across iterations. For each boundary, identify an explicit **forbidden crossing** — a connection or dependency that must not be introduced.
+4. **Change Axes**: Business, workflow, operational, or integration areas expected to vary and therefore needing isolation. For each axis, identify how it is isolated (which ARCH element or pattern absorbs the change).
+5. **Responsibility Collision Risks**: Responsibilities that agents or teams are likely to merge incorrectly. Explicitly separate them.
+6. **Invariants**: Architecture rules later iterations must not violate. Each invariant must be grounded in a requirement from `requirements.md`, a scenario from `spec.md`, or an explicit architectural constraint.
+7. **Non-goals / Anti-patterns**: Concerns this architecture pass does not solve, plus designs that would drift from the intent (e.g., "black-box ARCH elements without interface contracts", "implementation details leaking into architecture views").
+8. **Implementation Details to Exclude**: Concrete classes, files, API endpoints, DTO fields, database tables, framework selections, infrastructure manifests — anything that belongs in module design or implementation, not architecture.
+
+**Quality rules for framing**:
+- Every non-placeholder conclusion must be grounded in a requirement, scenario, or stated architectural constraint.
+- If evidence is insufficient to support a claim, record a specific gap instead of inventing facts.
+- Use stable names consistently across all four views and the architecture evaluation.
+- Remove generic statements ("scalable", "secure", "modular") unless they name owner, affected view, scope, and architecture consequence.
+
+**Output**: Record the framing decisions in the `## Architecture Framing` section of the generated artifact. The framing section appears after `## Overview` and before `## ID Schema` in the output template.
+
+### 5. Lifecycle Rules (When Evolving Existing Artifacts)
 
 When an existing `software-architecture-design.md` is loaded, apply these rules before generating new content:
 
@@ -97,58 +121,62 @@ When an existing `software-architecture-design.md` is loaded, apply these rules 
 
 If no existing `software-architecture-design.md` is found, skip this step — all elements are new.
 
-### 5. Decompose Requirements into Architecture Elements
+### 6. Decompose Requirements into Architecture Elements
 
 Follow the **strict translator constraint**: You are decomposing requirements into architecture elements. You must NOT invent capabilities not present in `requirements.md`.
 
-#### 5.1 Decomposition by Requirement Category
+#### 6.1 Decomposition by Requirement Category
 
 - **Functional requirements** (`REQ-NNN`): Each maps to one or more dedicated architecture elements. Group related capabilities into cohesive components.
 - **Non-functional requirements** (`REQ-NF-NNN`): Map to cross-cutting elements (e.g., logging, caching, error handling) or as additional parents on existing elements that implement the quality attribute.
 - **Interface requirements** (`REQ-IF-NNN`): Map to elements that own the interface contract. These will have detailed entries in the Interface View.
-- **Constraint requirements** (`REQ-CN-NNN`): Map to the same elements as their related functional requirements. Constraints modify behavior, not add new elements.
+- **Constraint requirements** (`REQ-CN-NNN`): Map to elements that enforce the constraint (e.g., rate limiter, schema validator) or annotate existing elements with constraint notes.
 
-#### 5.2 Architecture Element Assignment
+#### 6.2 IEEE 1016 Design Entity Attributes
 
-For each architecture element identified:
+Every architecture element must document these IEEE 1016 attributes:
+- **Identifier**: `ARCH-NNN` (sequential, starting at ARCH-001)
+- **Purpose**: Short name (the "Name" column in the Logical View)
+- **Function**: What it does (the "Description (Purpose)" column)
+- **Subordinates**: None at this level (dependencies are to REQ, not to other ARCH — Path B does not have a hierarchical SYS middle layer)
+- **Dependencies**: Parent `REQ-NNN` identifiers from `requirements.md`
 
-1. **Assign a unique ID**: `ARCH-NNN` (e.g., ARCH-001, ARCH-002). Sequential numbering, 3-digit zero-padded, never renumbered.
+#### 6.3 Many-to-Many Mapping
 
-2. **Name the element**: Short, descriptive name (e.g., "Requirements Parser", "Event Dispatcher", "Output Assembler").
+- A single REQ may be a parent of multiple ARCH elements (many-to-many)
+- An ARCH element may have multiple parent REQs (many-to-many)
+- The Logical View's "Parent Requirements (Dependencies)" column is the single source of truth for this mapping
 
-3. **Describe the element (IEEE 1016 purpose + function)**: What it does, its responsibility boundary. Must be specific enough to define an API contract — if a description is too vague to derive inputs/outputs/exceptions, refine until concrete.
+#### 6.4 Element Types
 
-4. **Map parent requirements (IEEE 1016 dependencies)**: List ALL `REQ-NNN` identifiers that this element satisfies. Many-to-many mapping is expected:
-   - A single ARCH may satisfy multiple REQs (e.g., `ARCH-003` satisfies `REQ-001, REQ-005, REQ-NF-002`)
-   - A single REQ may be satisfied by multiple ARCH elements (e.g., `REQ-001` is a parent of both `ARCH-001` and `ARCH-003`)
+Assign each ARCH element a type:
+- **Component**: Primary functional unit
+- **Service**: Background or infrastructure service
+- **Library**: Shared utility code
+- **Utility**: Stateless helper
+- **Adapter**: Protocol or format bridge
 
-5. **Classify type**: Component | Service | Library | Utility | Adapter | Cross-Cutting.
+#### 6.5 Cross-Cutting Tag
 
-#### 5.3 Cross-Cutting Rules (per IEEE 42010)
+For infrastructure/utility elements not traceable to a specific REQ (e.g., Logger, Thread Pool, Config Manager):
+- Set the "Parent Requirements (Dependencies)" column to `[CROSS-CUTTING] — <rationale>`
+- Cross-cutting elements MUST still have interface contracts in the Interface View
+- Cross-cutting elements MUST still have at least one parent `REQ-NNN` (per REQ-022 from `requirements.md`)
+- Do NOT abuse this tag — if a capability can be tied to a non-functional or constraint REQ, use that REQ instead
 
-- Infrastructure/utility elements (Logger, Thread Pool, Config Manager, ID Pattern Library, etc.) use `[CROSS-CUTTING]` tag with rationale explaining why the element is system-wide
-- Every `[CROSS-CUTTING]` element MUST still have interface contracts in the Interface View and at least one parent `REQ-NNN`
-- Cross-cutting elements are NOT derived — they are legitimate architecture components
+#### 6.6 Derived Elements
 
-#### 5.4 Derived Module Rules
-
-- If an element is neither traceable to a `REQ-NNN` nor qualifies as `[CROSS-CUTTING]`, flag it as `[DERIVED MODULE: description of the needed capability and why it is architecturally necessary]`
-- Do NOT silently assign an `ARCH-NNN` to derived modules — halt and flag
-- List all derived modules in the "Derived Requirements and Modules" section of the output
-
-#### 5.5 Derived Requirement Rules (per IEEE 1016 §4.3)
-
-- If a capability is implied by the architecture but has no corresponding `REQ-NNN`, flag it as `[DERIVED REQUIREMENT: description of the capability and why it is architecturally necessary]`
+When a capability is architecturally necessary but has no corresponding `REQ-NNN`, flag it as `[DERIVED REQUIREMENT: description of the capability and why it is architecturally necessary]`
 - The human must resolve each derived item before proceeding to integration test generation
 
-#### 5.6 Anti-Pattern Guard (per IEEE 42010)
+#### 6.7 Anti-Pattern Guard (per IEEE 42010)
 
 - Reject "black box" descriptions: every `ARCH-NNN` MUST have an explicit interface contract (inputs, outputs, exceptions) in the Interface View
 - If an element description is too vague to derive contracts, emit a warning and refine until concrete
 
-### 6. Build the Four Synthesized Architecture Views
+### 7. Build the Four Synthesized Architecture Views
 
-#### 6.1 Logical View (IEEE 1016 Decomposition §5.1 + Dependency §5.2 within IEEE 42010)
+#### 7.1 Logical View (IEEE 1016 Decomposition §5.1 + Dependency §5.2 within IEEE 42010)
 
 The primary view. Fill the Logical View table with all ARCH elements:
 
@@ -162,7 +190,9 @@ The primary view. Fill the Logical View table with all ARCH elements:
 - No ARCH element may have an empty Parent Requirements field (unless `[CROSS-CUTTING]`)
 - The Description column serves as the IEEE 1016 "purpose" and "function" attributes
 
-#### 6.2 Process View (IEEE 42010 / Kruchten 4+1 — no IEEE 1016 counterpart)
+**Gap tracking**: After the Logical View table, populate the Logical View Gaps table. Record any logical concern from requirements that cannot be mapped to an ARCH element or where uncertainty prevents complete decomposition. Every gap must name the affected element/capability and why it matters.
+
+#### 7.2 Process View (IEEE 42010 / Kruchten 4+1 — no IEEE 1016 counterpart)
 
 Document runtime interactions using Mermaid sequence diagrams:
 
@@ -177,7 +207,9 @@ Document runtime interactions using Mermaid sequence diagrams:
 - Model interaction flows from requirements analysis (not from a system design Dependency View — there is none in Path B)
 - This view directly feeds **Concurrency & Race Condition Testing** in integration test
 
-#### 6.3 Interface View (IEEE 1016 §5.3 Interface Identification + IEEE 42010)
+**Gap tracking**: After the Process View, populate the Process View Gaps table. Record gaps in runtime behavior understanding. Every gap must name the affected runtime link or scenario and why it matters.
+
+#### 7.3 Interface View (IEEE 1016 §5.3 Interface Identification + IEEE 42010)
 
 Define interface contracts for **every** ARCH-NNN element, with explicit external/internal distinction:
 
@@ -195,16 +227,16 @@ Define interface contracts for **every** ARCH-NNN element, with explicit externa
 - Cross-cutting elements MUST also have contracts defined
 - This view directly feeds **Interface Contract Testing** and **Interface Fault Injection** in integration test
 
-#### 6.4 Data Flow View (IEEE 1016 §5.4 Data Design + IEEE 42010)
+**Gap tracking**: After the Interface View, populate the Interface View Gaps table. Record gaps in interface contracts. Every gap must name the affected interface/contract and why it matters.
+
+#### 7.4 Data Flow View (IEEE 1016 §5.4 Data Design + IEEE 42010)
 
 Trace data through the architecture pipeline and document data structures:
 
 | Stage | Module | Input Format | Transformation | Output Format |
-|-------|--------|-------------|----------------|---------------|
 
 **Data Design supplement** (per IEEE 1016 §5.4):
 | Data Entity | Owning ARCH | Storage | Protection | Lifecycle |
-|-------------|-------------|---------|------------|-----------|
 
 **Rules**:
 - Show intermediate data formats at each pipeline stage
@@ -212,11 +244,13 @@ Trace data through the architecture pipeline and document data structures:
 - Each flow traces input → transformation → output with intermediate formats
 - Data flows directly drive **Data Flow Testing** in integration test
 
-### 7. Architecture Evaluation (ISO/IEC 42030:2019 / ISO/IEC 25010:2023)
+**Gap tracking**: After the Data Flow View, populate the Data Flow View Gaps table. Record gaps in data flow understanding. Every gap must name the affected data flow/entity and why it matters.
+
+### 8. Architecture Evaluation (ISO/IEC 42030:2019 / ISO/IEC 25010:2023)
 
 After generating the four views, perform a scenario-based fitness-for-purpose evaluation. This completes the IEEE 42010 "describe" → ISO 42030 "evaluate" cycle.
 
-#### 7.1 Quality Attribute Cross-Check (ISO/IEC 25010:2023)
+#### 8.1 Quality Attribute Cross-Check (ISO/IEC 25010:2023)
 
 For each characteristic implied or explicitly stated in `requirements.md`, confirm at least one ARCH element or view decision covers it:
 
@@ -231,7 +265,7 @@ For each characteristic implied or explicitly stated in `requirements.md`, confi
 
 **Action on gaps**: If a characteristic implied by the requirements is NOT addressed by any ARCH element or view decision, flag it as `[QUALITY GAP: ISO 25010 §X.X — <characteristic> not explicitly addressed]`.
 
-#### 7.2 Quality Attribute Justification (ISO/IEC 42030:2019)
+#### 8.2 Quality Attribute Justification (ISO/IEC 42030:2019)
 
 For each significant architectural decision (one that affects more than one view or introduces a cross-cutting element), document its quality attribute rationale:
 
@@ -239,21 +273,42 @@ For each significant architectural decision (one that affects more than one view
 |----------------------|------------------------------------|--------------------|
 | e.g., Pipeline architecture | Maintainability §4.2.7 ↑, Performance §4.2.3 ↓ | Sequential dependency accepted for modularity and testability |
 
-#### 7.3 Sensitivity and Trade-off Points
+#### 8.3 Sensitivity and Trade-off Points
 
 List any **sensitivity points** (where a small change significantly affects quality) and **trade-off points** (where improving one characteristic degrades another). Include these in the Architecture Overview.
 
-### 8. Write Output
+### 9. Architecture Gates
+
+After all views are generated and evaluated, verify the architecture artifact against these hard gates before writing output. Each gate is an **ERROR** if failed — do not proceed with failures.
+
+1. **No Implementation Leakage (ERROR)**: Verify that no view contains concrete classes, file paths, function names, DTO fields, database tables, framework selections, or deployment manifests. Architecture views must stay at design-entity level per IEEE 1016 (§4.1). Architecture-level type descriptions (e.g., "String", "Array<REQ>", "Dict[str, int]") are permitted in the Interface View — these describe contract types, not implementation DTOs. Prohibited items are language-specific or framework-specific constructs (e.g., "java.util.List<CustomerDTO>", "React.useState<OrderForm>").
+
+2. **Boundary Completeness (ERROR)**: Verify every stable boundary identified in the Architecture Framing (Step 4) has an explicit **forbidden crossing** documented in the output's Architecture Framing section. If a boundary has responsibilities but no forbidden crossing, add it now.
+
+3. **Decision Traceability (ERROR)**: Verify every major architectural decision (one that affects more than one view or introduces a cross-cutting element) is tied to a REQ, a quality characteristic (ISO 25010), or an explicit tradeoff. If a decision lacks consequence, affected view, or justification, document the missing information.
+
+4. **Invariant Grounding (ERROR)**: Verify every invariant listed in the Architecture Framing is tied to a requirement from `requirements.md`, a scenario from `spec.md`, or an explicit architectural constraint. If an invariant cannot be grounded, remove it or flag it as `[UNGROUNDED]` for human review.
+
+5. **No Invented Capabilities (ERROR)**: Verify all ARCH elements trace to REQ-NNN from `requirements.md` or are explicitly flagged as `[DERIVED REQUIREMENT]` / `[DERIVED MODULE]` with rationale in the Derived Requirements section. Remove any ARCH element not grounded in a requirement and not explicitly flagged as derived.
+
+6. **Gap Explicitness (ERROR)**: Verify all uncertain areas are recorded as specific gaps in the appropriate per-view Gaps table with affected element/link/interface/flow and why it matters. Generic "TBD" markers without scope are not acceptable. If uncertainty exists but no gap is recorded, add the gap entry now.
+
+**Output**: Record the gate results in the `## Architecture Gates` section of the generated artifact. Include each gate's status (✅ Passed / ❌ Failed) and a brief evidence note.
+
+### 10. Write Output
 
 Write the final artifact to `{VMODEL_DIR}/software-architecture-design.md` using the template structure. Include:
 - header metadata (feature, branch, date)
 - source references for `requirements.md`
+- **Architecture Framing** (intent, core tensions, stable boundaries, change axes, invariants, anti-patterns — from Step 4)
 - IEEE 1016/42010 synthesized architecture views (Logical, Process, Interface, Data Flow)
+- **Per-view gap tables** (Logical View Gaps, Process View Gaps, Interface View Gaps, Data Flow View Gaps — from Step 7)
 - Architecture evaluation (ISO 42030 + ISO 25010)
+- **Architecture Gates** verification results (6 gates with status and evidence — from Step 9)
 - traceability summary and coverage metrics
 - derived requirement/module records
 
-### 9. Finish
+### 11. Finish
 
 If the output is complete and valid, conclude with a summary that confirms:
 - `REQ-NNN` → `ARCH-NNN` coverage (forward and backward)
@@ -261,3 +316,5 @@ If the output is complete and valid, conclude with a summary that confirms:
 - architecture evaluation performed (ISO 42030 + ISO 25010)
 - no silent derived artifacts — all flagged for human review
 - Path A coexistence warning (if `architecture-design.md` was detected)
+- **Architecture gates**: all 6 passed, or explicit failures with required remediation
+- **Gaps recorded**: N gaps across views (with affected-view breakdown)

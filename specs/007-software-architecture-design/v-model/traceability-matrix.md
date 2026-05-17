@@ -1,15 +1,18 @@
 # Traceability Matrix: Software Architecture Design (Path B)
 
 **Feature Branch**: `007-software-architecture-design`
-**Generated**: 2026-05-04
+**Generated**: 2026-05-04 | **Regenerated**: 2026-05-17
 **Source**: `specs/007-software-architecture-design/v-model/`
 **Domain**: `iso_26262`
+**Architecture Governance**: Architecture Framing, Per-View Gap Tables, and Architecture Gates (6 gates, all passed) added to `software-architecture-design.md` on regeneration.
 
 ## Overview
 
 This traceability matrix links every requirement to its test cases and executable scenarios at all applicable V-Model levels. Generated deterministically to ensure audit-grade accuracy.
 
 **Path B note**: This feature uses the combined Path B (`software-architecture-design`), which replaces the `system-design` → `architecture-design` chain. No `SYS-NNN` identifiers exist. Matrix B (System Verification) is therefore not applicable. Matrix C uses `REQ → ARCH → ITP → ITS` instead of `SYS → ARCH → ITP → ITS`.
+
+**Regeneration note**: `software-architecture-design.md` was regenerated on 2026-05-17 with the addition of Architecture Framing (intent, core tensions, stable boundaries, change axes, invariants, anti-patterns, responsibility collision risks, implementation details to exclude), four per-view gap tables (Logical View Gaps, Process View Gaps, Interface View Gaps, Data Flow View Gaps — all reporting "None"), and six Architecture Gates (all passed). The 16 ARCH-NNN elements, their REQ mappings, and all downstream traceability links (ARCH→ITP, MOD→UTP) remain unchanged.
 
 ## Section 1: Coverage Audit
 
